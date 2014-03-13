@@ -4,15 +4,12 @@
 # Dependencies:
 #   "redis": ">=0.7.2"
 #   "moment": ">=1.7.0"
-#   "connect": ">=2.4.5"
-#   "connect_router": "*"
 #
 # Configuration:
-#   LOG_REDIS_URL: URL to Redis backend to use for logging (uses REDISTOGO_URL 
+#   LOG_REDIS_URL: URL to Redis backend to use for logging (uses REDISTOGO_URL
 #                  if unset, and localhost:6379 if that is unset.
 #   LOG_HTTP_USER: username for viewing logs over HTTP (default 'logs' if unset)
 #   LOG_HTTP_PASS: password for viewing logs over HTTP (default 'changeme' if unset)
-#   LOG_HTTP_PORT: port for our logging Connect server to listen on (default 8081)
 #   LOG_STEALTH:   If set, bot will not announce that it is logging in chat
 #   LOG_MESSAGES_ONLY: If set, bot will not log room enter or leave events
 #
@@ -57,8 +54,6 @@
 Redis = require "redis"
 Url   = require "url"
 Util  = require "util"
-Connect = require "connect"
-Connect.router = require "connect_router"
 OS = require "os"
 moment = require "moment"
 hubot = require "hubot"
@@ -110,72 +105,65 @@ module.exports = (robot) ->
   ## HTTP interface ##
   ####################
 
-  connect = Connect()
-  connect.use Connect.basicAuth(process.env.LOG_HTTP_USER || 'logs', process.env.LOG_HTTP_PASS || 'changeme')
-  connect.use Connect.bodyParser()
-  connect.use Connect.query()
-  connect.use Connect.router (app) ->
-    app.get '/', (req, res) ->
-      res.statusCode = 200
-      res.setHeader 'Content-Type', 'text/html'
-      res.end views.index
+  robot.router.get '/', (req, res) ->
+    res.statusCode = 200
+    res.setHeader 'Content-Type', 'text/html'
+    res.end views.index
 
-    app.get '/logs/view', (req, res) ->
-      res.statusCode = 200
-      res.setHeader 'Content-Type', 'text/html'
-      if not (req.query.start && req.query.end)
-        res.end '<strong>No start or end date provided</strong>'
-      m_start = parseInt(req.query.start)
-      m_end   = parseInt(req.query.end)
-      if isNaN(m_start) or isNaN(m_end)
-        res.end "Invalid range"
-        return
-      m_start = moment.unix m_start
-      m_end   = moment.unix m_end
-      room = req.query.room || 'general'
-      presence = !!req.query.presence
-      get_logs_for_range client, m_start, m_end, room, (replies) ->
-        res.write views.log_view.head
-        res.write format_logs_for_html(replies, presence).join("\r\n")
-        res.end views.log_view.tail
-
-    app.get '/logs/:room', (req, res) ->
-      res.statusCode = 200
-      res.setHeader 'Content-Type', 'text/html'
+  robot.router.get '/logs/view', (req, res) ->
+    res.statusCode = 200
+    res.setHeader 'Content-Type', 'text/html'
+    if not (req.query.start && req.query.end)
+      res.end '<strong>No start or end date provided</strong>'
+    m_start = parseInt(req.query.start)
+    m_end   = parseInt(req.query.end)
+    if isNaN(m_start) or isNaN(m_end)
+      res.end "Invalid range"
+      return
+    m_start = moment.unix m_start
+    m_end   = moment.unix m_end
+    room = req.query.room || 'general'
+    presence = !!req.query.presence
+    get_logs_for_range client, m_start, m_end, room, (replies) ->
       res.write views.log_view.head
-      res.write "<h2>Logs for #{req.params.room}</h2>\r\n"
-      res.write "<ul>\r\n"
+      res.write format_logs_for_html(replies, presence).join("\r\n")
+      res.end views.log_view.tail
 
-      # This is a bit of a hack... KEYS takes O(n) time
-      # and shouldn't be used for this, but it's not worth
-      # creating a set just so that we can list all logs 
-      # for a room.
-      client.keys "logs:#{req.params.room}:*", (err, replies) ->
-        days = []
-        for key in replies
-          key = key.slice key.lastIndexOf(':')+1, key.length
-          days.push moment(key, "YYYYMMDD")
-        days.sort (a, b) ->
-            return b.diff(a)
-        days.forEach (date) ->
-          res.write "<li><a href=\"/logs/#{req.params.room}/#{date.format('YYYYMMDD')}\">#{date.format('dddd, MMMM Do YYYY')}</a></li>\r\n"
-        res.write "</ul>"
-        res.end views.log_view.tail
+  robot.router.get '/logs/:room', (req, res) ->
+    res.statusCode = 200
+    res.setHeader 'Content-Type', 'text/html'
+    res.write views.log_view.head
+    res.write "<h2>Logs for #{req.params.room}</h2>\r\n"
+    res.write "<ul>\r\n"
 
-    app.get '/logs/:room/:id', (req, res) ->
-      res.statusCode = 200
-      res.setHeader 'Content-Type', 'text/html'
-      presence = !!req.query.presence
-      id = parseInt req.params.id
-      if isNaN(id)
-        res.end "Bad log ID"
-        return
-      get_log client, req.params.room, id, (logs) ->
-        res.write views.log_view.head
-        res.write format_logs_for_html(logs, presence).join("\r\n")
-        res.end views.log_view.tail
+    # This is a bit of a hack... KEYS takes O(n) time
+    # and shouldn't be used for this, but it's not worth
+    # creating a set just so that we can list all logs
+    # for a room.
+    client.keys "logs:#{req.params.room}:*", (err, replies) ->
+      days = []
+      for key in replies
+        key = key.slice key.lastIndexOf(':')+1, key.length
+        days.push moment(key, "YYYYMMDD")
+      days.sort (a, b) ->
+          return b.diff(a)
+      days.forEach (date) ->
+        res.write "<li><a href=\"/logs/#{req.params.room}/#{date.format('YYYYMMDD')}\">#{date.format('dddd, MMMM Do YYYY')}</a></li>\r\n"
+      res.write "</ul>"
+      res.end views.log_view.tail
 
-  robot.log_server = connect.listen process.env.LOG_HTTP_PORT || 8081
+  robot.router.get '/logs/:room/:id', (req, res) ->
+    res.statusCode = 200
+    res.setHeader 'Content-Type', 'text/html'
+    presence = !!req.query.presence
+    id = parseInt req.params.id
+    if isNaN(id)
+      res.end "Bad log ID"
+      return
+    get_log client, req.params.room, id, (logs) ->
+      res.write views.log_view.head
+      res.write format_logs_for_html(logs, presence).join("\r\n")
+      res.end views.log_view.tail
 
   ####################
   ## Chat interface ##
@@ -192,7 +180,7 @@ module.exports = (robot) ->
       return
     if robot.brain.data.logging[room].enabled and not robot.logging[room].notified
       msg.send "I'm logging messages in #{room} at " +
-                 "http://#{OS.hostname()}:#{process.env.LOG_HTTP_PORT || 8081}/" +
+                 "http://#{OS.hostname()}}/" +
                  "logs/#{encodeURIComponent(room)}/#{date_id()}\n" +
                  "Say `#{robot.name} stop logging forever' to disable logging indefinitely."
       robot.logging[room].notified = true
@@ -399,7 +387,7 @@ get_logs_for_array = (redis, room, ids, callback) ->
 # Params:
 #   redis - a Redis client object
 #   date  - Date or Moment object representing the date to look up
-#   room  - the room to look up 
+#   room  - the room to look up
 #   callback - function to pass an array of log objects for date to
 get_logs_for_day = (redis, date, room, callback) ->
   get_log redis, room, date_id(date), (reply) ->
@@ -442,7 +430,7 @@ enable_logging = (robot, redis, response) ->
   # Fall back to user name if no room, or "Unknown"
   room = response.message.user.room || response.message.user.name || response.message.user.id || "Unknown"
   response.reply "I will log messages in #{room} at " +
-                 "http://#{OS.hostname()}:#{process.env.LOG_HTTP_PORT || 8081}/" +
+                 "http://#{OS.hostname()}}/" +
                  "logs/#{encodeURIComponent(room)}/#{date_id()} from now on.\n" +
                  "Say `#{robot.name} stop logging forever' to disable logging indefinitely."
   robot.brain.save()
@@ -496,7 +484,7 @@ disable_logging = (robot, redis, response, end=0) ->
     robot.brain.save()
     return
   log_entry(redis, new Entry(robot.name, Date.now(), 'text',
-            "#{response.message.user.name || response.message.user.id} disabled logging indefinitely."), 
+            "#{response.message.user.name || response.message.user.id} disabled logging indefinitely."),
             room)
 
   robot.brain.save()
